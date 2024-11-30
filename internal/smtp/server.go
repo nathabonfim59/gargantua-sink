@@ -104,7 +104,7 @@ func (server *Server) Start() error {
 	server.server.MaxMessageBytes = 1024 * 1024 // 1MB
 	server.server.MaxRecipients = 50
 	server.server.AllowInsecureAuth = true
-	server.server.Direction = smtp.DirectionInbound
+	// server.server.Direction = smtp.DirectionInbound
 
 	log.Printf("Starting SMTP server on :%d", server.port)
 	return server.server.ListenAndServe()

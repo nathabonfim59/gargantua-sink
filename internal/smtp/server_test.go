@@ -203,17 +203,21 @@ func TestReceivingEmailsWithAttachments(t *testing.T) {
 		t.Fatalf("close failed: %v", err)
 	}
 
+	// Give the server a moment to process and store the email
+	time.Sleep(100 * time.Millisecond)
+
 	// Verify email was stored with attachments
-	storedFile := filepath.Join(tempDir, "example.com", "recipient", "*.eml")
-	matches, err := filepath.Glob(storedFile)
+	storedDir := filepath.Join(tempDir, "example.com", "recipient", "IN")
+	files, err := os.ReadDir(storedDir)
 	if err != nil {
-		t.Fatalf("finding stored email failed: %v", err)
+		t.Fatalf("reading stored directory failed: %v", err)
 	}
-	if len(matches) == 0 {
+	if len(files) == 0 {
 		t.Fatal("no email file found")
 	}
 
-	content, err := os.ReadFile(matches[0])
+	// Read the first (and should be only) email file
+	content, err := os.ReadFile(filepath.Join(storedDir, files[0].Name()))
 	if err != nil {
 		t.Fatalf("reading stored email failed: %v", err)
 	}
@@ -325,7 +329,7 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 	defer server.Stop()
 
 	const (
-		numSessions    = 10 // Number of simultaneous SMTP sessions
+		numSessions     = 10 // Number of simultaneous SMTP sessions
 		emailsPerSession = 5 // Number of emails to send in each session
 	)
 
@@ -388,6 +392,7 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 				// Small delay to simulate real-world usage
 				time.Sleep(10 * time.Millisecond)
 			}
+
 		}(session)
 	}
 
@@ -404,7 +409,7 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 	for session := 0; session < numSessions; session++ {
 		domain := "test.com"
 		user := fmt.Sprintf("recipient%d", session)
-		userDir := filepath.Join(tempDir, domain, user)
+		userDir := filepath.Join(tempDir, domain, user, "IN")
 		
 		files, err := os.ReadDir(userDir)
 		if err != nil {
