@@ -2,11 +2,14 @@
 package smtp
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-smtp"
@@ -129,15 +132,16 @@ func (s *Server) AddDomain(domain, certFile, keyFile, storageDir string) error {
 	}
 
 	// Create storage for the domain
-	storage, err := storage.NewEmailStorage(storageDir)
+	domainStorage, err := storage.NewEmailStorage(storageDir)
 	if err != nil {
 		return fmt.Errorf("creating storage for domain %s: %w", domain, err)
 	}
 
 	// Create domain configuration
 	config := &DomainConfig{
-		Domain:  domain,
-		Storage: storage,
+		Domain:     domain,
+		Storage:    domainStorage,
+		StorageDir: storageDir,
 	}
 
 	// Configure TLS if certificate files are provided
@@ -148,7 +152,7 @@ func (s *Server) AddDomain(domain, certFile, keyFile, storageDir string) error {
 		}
 		config.TLSConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
-			ServerName:   domain,
+			ServerName:  domain,
 		}
 	}
 
@@ -168,12 +172,7 @@ func (server *Server) Start() error {
 		listener.Close()
 	}
 
-	backend := &Backend{
-		storage: server.storage,
-		domains: server.domains,
-	}
-
-	server.server = smtp.NewServer(backend)
+	server.server = smtp.NewServer(server)
 	server.server.Addr = fmt.Sprintf(":%d", server.port)
 	server.server.Domain = "localhost"
 	server.server.ReadTimeout = 10 * time.Second
@@ -207,11 +206,90 @@ func (server *Server) Start() error {
 	return server.server.ListenAndServe()
 }
 
-// Stop gracefully shuts down the SMTP server.
+// Stop gracefully shuts down the SMTP server
 func (server *Server) Stop() error {
 	if server.server != nil {
 		return server.server.Close()
 	}
+	return nil
+}
+
+// Login handles SMTP authentication
+func (server *Server) Login(state *smtp.ConnectionState, username, password string) error {
+	// For development purposes, accept all authentication
+	return nil
+}
+
+// AnonymousLogin handles anonymous SMTP connections
+func (server *Server) AnonymousLogin(state *smtp.ConnectionState) error {
+	// Allow anonymous connections
+	return nil
+}
+
+// Mail handles the MAIL FROM command
+func (server *Server) Mail(state *smtp.ConnectionState, from string, opts *smtp.MailOptions) error {
+	return nil
+}
+
+// Rcpt handles the RCPT TO command
+func (server *Server) Rcpt(state *smtp.ConnectionState, to string, opts *smtp.RcptOptions) error {
+	// Extract domain from recipient address
+	parts := strings.Split(to, "@")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid recipient address: %s", to)
+	}
+	domain := parts[1]
+
+	// Check if we handle this domain
+	if _, ok := server.domains[domain]; !ok {
+		return fmt.Errorf("domain not handled: %s", domain)
+	}
+
+	return nil
+}
+
+// Data handles the DATA command
+func (server *Server) Data(state *smtp.ConnectionState, r io.Reader) error {
+	// Read email data
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("reading email data: %w", err)
+	}
+
+	// Parse email to get recipients
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("parsing email: %w", err)
+	}
+
+	// Get recipients from To header
+	to := msg.Header.Get("To")
+	rcpts, err := mail.ParseAddressList(to)
+	if err != nil {
+		return fmt.Errorf("parsing recipients: %w", err)
+	}
+
+	// Store email for each recipient
+	for _, rcpt := range rcpts {
+		parts := strings.Split(rcpt.Address, "@")
+		if len(parts) != 2 {
+			continue
+		}
+		domain := parts[1]
+		username := parts[0]
+
+		// Get domain configuration
+		config, ok := server.domains[domain]
+		if !ok {
+			continue
+		}
+
+		// Store email using domain-specific storage
+		if err := config.Storage.StoreEmail(domain, username, "IN", data); err != nil {
+			return fmt.Errorf("storing email for %s: %w", rcpt.Address, err)
+		}
+	}
+
 	return nil
 }
 
