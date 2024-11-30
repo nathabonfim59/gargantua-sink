@@ -4,32 +4,41 @@ A robust and high-performance solution for capturing and storing emails in Go.
 
 ## 🎯 About
 
-Gargantua Sink is an SMTP server designed to capture and store all emails that arrive at a specific IP address and port.
+Gargantua Sink is an SMTP server designed to capture and store all emails that pass through it. It functions both as a development tool and as a production email sink.
 
-It's a useful tool for development, testing and debugging of applications that send emails, and can also be used as a temporary storage solution during email server migrations, ensuring that no messages are lost during the transition process.
+It's particularly useful for:
+- Development and testing of applications that send emails
+- Email server migrations (ensuring no messages are lost during transition)
+- Archiving all incoming and outgoing emails in a structured format
+- Debugging email-related issues in production environments
 
 ## ✨ Features
 
-- Captures all received emails
-- Supports multiple simultaneous SMTP sessions
+- Captures both incoming and outgoing emails
+- Supports standard SMTP protocol
 - Thread-safe email storage with unique file identifiers
-- Automatically organizes by domain and user
+- Automatically organizes by domain, user, and direction (IN/OUT)
 - Stores emails in .eml format
-- Preserves all attachments
+- Preserves all email content and metadata
 - Organized and intuitive file structure
-- Naming based on timestamp, unique ID, and subject
+- Naming based on timestamp and unique ID
 
 ## 🚀 Installation
 
 ```bash
-go install
-github.com/nathabonfim59/gargantua-sink@latest
+go install github.com/nathabonfim59/gargantua-sink@latest
 ```
 
 ## 💻 Usage
 
+### Development Mode
 ```bash
 gargantua-sink --port 2525 --storage-path /path/to/storage
+```
+
+### Production Mode
+```bash
+sudo gargantua-sink --port 25 --storage-path /path/to/storage
 ```
 
 ### Parameters
@@ -43,34 +52,52 @@ gargantua-sink --port 2525 --storage-path /path/to/storage
 storage/
 ├── example.com/
 │   ├── john.doe/
-│   │   ├── 20230615123456-a1b2c3d4-welcome-to-our-service.eml
-│   │   └── 20230615124512-e5f6g7h8-your-account-details.eml
+│   │   ├── IN/
+│   │   │   └── 20230615123456-a1b2c3d4-from-sender_domain.com.eml
+│   │   └── OUT/
+│   │       └── 20230615124512-e5f6g7h8-to-recipient_domain.com.eml
 │   └── jane.doe/
-│       └── 20230615130145-i9j0k1l2-monthly-newsletter.eml
+│       ├── IN/
+│       │   └── 20230615130145-i9j0k1l2-from-newsletter_service.com.eml
+│       └── OUT/
+│           └── 20230615131234-m3n4o5p6-to-support_company.com.eml
 └── another-domain.com/
     └── user/
-        └── 20230615140023-m3n4o5p6-important-update.eml
+        ├── IN/
+        │   └── 20230615140023-q7r8s9t0-from-system_alerts.com.eml
+        └── OUT/
+            └── 20230615141512-u1v2w3x4-to-client_domain.com.eml
 ```
+
+### Email Storage Format
+- **Incoming Emails**: Stored in the recipient's `IN` directory
+- **Outgoing Emails**: Stored in the sender's `OUT` directory
+- **File Naming**: `[timestamp]-[unique_id]-[from/to]-[sender/recipient].eml`
+
+## 🔧 Production Setup
+
+### Server Configuration
+1. Install Gargantua Sink on your server
+2. Ensure port 25 is open in your firewall
+3. Run Gargantua Sink with root privileges on port 25
+4. Configure your email routing to point to the server
+5. Set up appropriate storage permissions and monitoring
+
+### Security Considerations
+- Run on port 25 for standard SMTP communication
+- Ensure proper file permissions on the storage directory
+- Monitor storage space usage
+- Implement appropriate backup and rotation policies
 
 ## ⚡ Performance
 
 Gargantua Sink is designed for high performance and reliability:
 
-- Handles 3000+ emails per second under load
-- Supports multiple concurrent SMTP sessions
-- Thread-safe storage with unique file identifiers
-- Efficient handling of attachments and large emails
+- Concurrent email processing with goroutines
+- Thread-safe storage operations
+- Efficient file system organization
 - Minimal memory footprint
-
-## 🔧 Configuration
-
-By default, Gargantua Sink requires no additional configuration. However, you can customize its behavior through environment variables:
-
-```bash
-GARGANTUA_PORT=2525
-GARGANTUA_STORAGE_PATH=/path/to/storage
-GARGANTUA_MAX_SIZE=10485760  # Maximum email size in bytes (10MB)
-```
+- Unique file identifiers to prevent conflicts
 
 ## 🤝 Contributing
 
