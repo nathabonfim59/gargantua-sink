@@ -2,6 +2,7 @@
 package smtp
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -89,9 +90,10 @@ func (s *Session) Logout() error {
 
 // Server represents an SMTP server instance.
 type Server struct {
-	port    int
-	storage *storage.EmailStorage
-	server  *smtp.Server
+	port      int
+	storage   *storage.EmailStorage
+	server    *smtp.Server
+	tlsConfig *tls.Config
 }
 
 // NewServer creates a new SMTP server instance.
@@ -100,6 +102,21 @@ func NewServer(port int, emailStorage *storage.EmailStorage) *Server {
 		port:    port,
 		storage: emailStorage,
 	}
+}
+
+// SetTLSConfig configures TLS for the server using certificate files
+func (server *Server) SetTLSConfig(certFile, keyFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("loading TLS certificates: %w", err)
+	}
+
+	server.tlsConfig = &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:  tls.VersionTLS12,
+	}
+
+	return nil
 }
 
 // Start initializes the SMTP server and begins listening for connections.
@@ -112,8 +129,16 @@ func (server *Server) Start() error {
 	server.server.WriteTimeout = 10 * time.Second
 	server.server.MaxMessageBytes = 1024 * 1024 // 1MB
 	server.server.MaxRecipients = 50
-	server.server.AllowInsecureAuth = true
-	// server.server.Direction = smtp.DirectionInbound
+	
+	// Configure TLS if certificates are provided
+	if server.tlsConfig != nil {
+		server.server.TLSConfig = server.tlsConfig
+		server.server.AllowInsecureAuth = false // Require secure authentication when TLS is enabled
+		log.Printf("TLS enabled")
+	} else {
+		server.server.AllowInsecureAuth = true
+		log.Printf("Warning: Running without TLS encryption")
+	}
 
 	log.Printf("Starting SMTP server on :%d", server.port)
 	return server.server.ListenAndServe()

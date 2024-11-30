@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,8 @@ var (
 	// Configuration flags
 	serverPort  int
 	storagePath string
+	certFile    string
+	keyFile     string
 
 	rootCmd = &cobra.Command{
 		Use:   "gargantua-sink",
@@ -27,6 +30,8 @@ and inspect emails during application development.`,
 func init() {
 	rootCmd.PersistentFlags().IntVarP(&serverPort, "port", "p", 2525, "SMTP server listening port")
 	rootCmd.PersistentFlags().StringVarP(&storagePath, "storage-path", "s", "", "Directory path for email storage")
+	rootCmd.PersistentFlags().StringVar(&certFile, "tls-cert", "", "Path to TLS certificate file (optional)")
+	rootCmd.PersistentFlags().StringVar(&keyFile, "tls-key", "", "Path to TLS private key file (optional)")
 	rootCmd.MarkPersistentFlagRequired("storage-path")
 }
 
@@ -43,6 +48,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	server := smtp.NewServer(serverPort, emailStorage)
+
+	// Configure TLS if certificate files are provided
+	if certFile != "" && keyFile != "" {
+		if err := server.SetTLSConfig(certFile, keyFile); err != nil {
+			return fmt.Errorf("configuring TLS: %w", err)
+		}
+		log.Printf("TLS enabled with certificate: %s", certFile)
+	}
+
 	log.Printf("Starting Gargantua Sink SMTP server on port %d", serverPort)
 	log.Printf("Emails will be stored in: %s", storagePath)
 	
