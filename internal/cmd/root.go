@@ -2,7 +2,11 @@
 package cmd
 
 import (
+	"log"
+
 	"github.com/spf13/cobra"
+	"github.com/nathabonfim59/gargantua-sink/internal/smtp"
+	"github.com/nathabonfim59/gargantua-sink/internal/storage"
 )
 
 var (
@@ -33,6 +37,14 @@ func Execute() error {
 
 // runServer initializes and starts the SMTP server.
 func runServer(cmd *cobra.Command, args []string) error {
-	// TODO: Initialize and start SMTP server
-	return nil
+	emailStorage, err := storage.NewEmailStorage(storagePath)
+	if err != nil {
+		return err
+	}
+
+	server := smtp.NewServer(serverPort, emailStorage)
+	log.Printf("Starting Gargantua Sink SMTP server on port %d", serverPort)
+	log.Printf("Emails will be stored in: %s", storagePath)
+	
+	return server.Start()
 }
