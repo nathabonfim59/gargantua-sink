@@ -67,7 +67,7 @@ func (s *Session) Data(r io.Reader) error {
 	return nil
 }
 
-// Reset resets the session state.
+// Reset resets the session state as required by go-smtp.Session interface.
 func (s *Session) Reset() {
 	s.from = ""
 	s.recipients = nil

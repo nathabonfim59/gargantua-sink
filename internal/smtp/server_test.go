@@ -316,3 +316,120 @@ func TestStressWithMultipleDomains(t *testing.T) {
 		t.Errorf("expected %d domains, got %d", numDomains, len(domains))
 	}
 }
+
+func TestSimultaneousSMTPSessions(t *testing.T) {
+	server, _, tempDir, port, err := setupTestServer(t)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	defer server.Stop()
+
+	const (
+		numSessions    = 10 // Number of simultaneous SMTP sessions
+		emailsPerSession = 5 // Number of emails to send in each session
+	)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, numSessions*emailsPerSession)
+
+	// Start multiple sessions in parallel
+	for session := 0; session < numSessions; session++ {
+		wg.Add(1)
+		go func(sessionID int) {
+			defer wg.Done()
+
+			// Establish SMTP connection
+			client, err := smtp.Dial(fmt.Sprintf("localhost:%d", port))
+			if err != nil {
+				errCh <- fmt.Errorf("session %d dial failed: %w", sessionID, err)
+				return
+			}
+			defer client.Close()
+
+			// Send multiple emails within the same session
+			for emailID := 0; emailID < emailsPerSession; emailID++ {
+				from := fmt.Sprintf("sender%d@test.com", sessionID)
+				to := fmt.Sprintf("recipient%d@test.com", sessionID)
+				subject := fmt.Sprintf("Test Email %d from Session %d", emailID, sessionID)
+				body := fmt.Sprintf("Email %d content from session %d", emailID, sessionID)
+
+				email, err := createTestEmail(from, to, subject, body, nil)
+				if err != nil {
+					errCh <- fmt.Errorf("session %d email %d create failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				if err := client.Mail(from, nil); err != nil {
+					errCh <- fmt.Errorf("session %d email %d MAIL FROM failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				if err := client.Rcpt(to, nil); err != nil {
+					errCh <- fmt.Errorf("session %d email %d RCPT TO failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				wc, err := client.Data()
+				if err != nil {
+					errCh <- fmt.Errorf("session %d email %d DATA failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				if _, err = wc.Write(email); err != nil {
+					errCh <- fmt.Errorf("session %d email %d write failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				if err := wc.Close(); err != nil {
+					errCh <- fmt.Errorf("session %d email %d close failed: %w", sessionID, emailID, err)
+					return
+				}
+
+				// Small delay to simulate real-world usage
+				time.Sleep(10 * time.Millisecond)
+			}
+		}(session)
+	}
+
+	// Wait for all sessions to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for any errors
+	for err := range errCh {
+		t.Error(err)
+	}
+
+	// Verify emails were stored correctly
+	for session := 0; session < numSessions; session++ {
+		domain := "test.com"
+		user := fmt.Sprintf("recipient%d", session)
+		userDir := filepath.Join(tempDir, domain, user)
+		
+		files, err := os.ReadDir(userDir)
+		if err != nil {
+			t.Errorf("reading directory for session %d failed: %v", session, err)
+			continue
+		}
+
+		if len(files) != emailsPerSession {
+			t.Errorf("session %d: expected %d emails, got %d", session, emailsPerSession, len(files))
+			continue
+		}
+
+		// Verify each email's content
+		for _, file := range files {
+			content, err := os.ReadFile(filepath.Join(userDir, file.Name()))
+			if err != nil {
+				t.Errorf("reading email file %s failed: %v", file.Name(), err)
+				continue
+			}
+
+			if !bytes.Contains(content, []byte(fmt.Sprintf("from session %d", session))) {
+				t.Errorf("email %s does not contain expected session ID %d", file.Name(), session)
+			}
+		}
+	}
+
+	t.Logf("Successfully processed %d simultaneous sessions with %d emails each", numSessions, emailsPerSession)
+}

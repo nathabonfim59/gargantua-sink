@@ -2,6 +2,8 @@
 package storage
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +23,13 @@ var (
 	safeFilename = regexp.MustCompile(`[^a-zA-Z0-9-.]`)
 )
 
+// generateUniqueID generates a random 8-character hex string
+func generateUniqueID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // NewEmailStorage creates a new storage instance with the specified root directory.
 // It ensures the storage directory exists and is accessible.
 func NewEmailStorage(rootPath string) (*EmailStorage, error) {
@@ -35,7 +44,7 @@ func NewEmailStorage(rootPath string) (*EmailStorage, error) {
 
 // StoreEmail saves an email message to the filesystem using the specified metadata.
 // The email is stored in the following structure:
-// rootPath/domain/user/YYYYMMDDHHMMSS-subject.eml
+// rootPath/domain/user/YYYYMMDDHHMMSS-[unique-id]-subject.eml
 func (storage *EmailStorage) StoreEmail(domain, user, subject string, content []byte) error {
 	storage.mu.Lock()
 	defer storage.mu.Unlock()
@@ -43,7 +52,8 @@ func (storage *EmailStorage) StoreEmail(domain, user, subject string, content []
 	// Create safe filename from subject
 	safeSubject := safeFilename.ReplaceAllString(subject, "_")
 	timestamp := time.Now().Format("20060102150405")
-	filename := fmt.Sprintf("%s-%s.eml", timestamp, safeSubject)
+	uniqueID := generateUniqueID()
+	filename := fmt.Sprintf("%s-%s-%s.eml", timestamp, uniqueID, safeSubject)
 
 	// Create user directory
 	userPath := filepath.Join(storage.rootPath, domain, user)
