@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"time"
 
 	"github.com/emersion/go-smtp"
@@ -155,8 +156,18 @@ func (s *Server) AddDomain(domain, certFile, keyFile, storageDir string) error {
 	return nil
 }
 
-// Start initializes the SMTP server and begins listening for connections.
+// Start initializes and starts the SMTP server
 func (server *Server) Start() error {
+	// If port is 0, find a random available port
+	if server.port == 0 {
+		listener, err := net.Listen("tcp", ":0")
+		if err != nil {
+			return fmt.Errorf("finding available port: %w", err)
+		}
+		server.port = listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+	}
+
 	backend := &Backend{
 		storage: server.storage,
 		domains: server.domains,
@@ -164,36 +175,35 @@ func (server *Server) Start() error {
 
 	server.server = smtp.NewServer(backend)
 	server.server.Addr = fmt.Sprintf(":%d", server.port)
+	server.server.Domain = "localhost"
 	server.server.ReadTimeout = 10 * time.Second
 	server.server.WriteTimeout = 10 * time.Second
 	server.server.MaxMessageBytes = 1024 * 1024 // 1MB
 	server.server.MaxRecipients = 50
+	server.server.AllowInsecureAuth = true
 
-	// Configure TLS if any domains are configured
-	if len(server.domains) > 0 {
-		// Create a TLS config that selects the appropriate certificate based on domain
-		tlsConfig := &tls.Config{
-			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				if config, ok := server.domains[hello.ServerName]; ok {
-					return &config.TLSConfig.Certificates[0], nil
-				}
-				// Return the first certificate as default if domain not found
-				for _, config := range server.domains {
-					return &config.TLSConfig.Certificates[0], nil
-				}
-				return nil, fmt.Errorf("no certificate found for domain: %s", hello.ServerName)
-			},
-			MinVersion: tls.VersionTLS12,
+	// Configure TLS if any domains are configured with certificates
+	tlsConfigs := make(map[string]*tls.Config)
+	for domain, config := range server.domains {
+		if config.TLSConfig != nil {
+			tlsConfigs[domain] = config.TLSConfig
 		}
-		server.server.TLSConfig = tlsConfig
-		server.server.AllowInsecureAuth = false
-		log.Printf("TLS enabled for %d domains", len(server.domains))
-	} else {
-		server.server.AllowInsecureAuth = true
-		log.Printf("Warning: Running without TLS encryption")
 	}
 
-	log.Printf("Starting SMTP server on :%d", server.port)
+	if len(tlsConfigs) > 0 {
+		server.server.TLSConfig = &tls.Config{
+			GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+				if config, ok := tlsConfigs[hello.ServerName]; ok {
+					return config, nil
+				}
+				// Return default config if no matching domain found
+				return &tls.Config{
+					Certificates: []tls.Certificate{},
+				}, nil
+			},
+		}
+	}
+
 	return server.server.ListenAndServe()
 }
 

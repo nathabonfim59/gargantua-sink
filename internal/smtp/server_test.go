@@ -501,6 +501,13 @@ func TestMultiDomainEmailDelivery(t *testing.T) {
 	domain1Dir := filepath.Join(tmpDir, "domain1")
 	domain2Dir := filepath.Join(tmpDir, "domain2")
 
+	// Create user directories
+	for _, dir := range []string{domain1Dir, domain2Dir} {
+		if err := os.MkdirAll(filepath.Join(dir, "user", "IN"), 0755); err != nil {
+			t.Fatalf("Failed to create directory structure: %v", err)
+		}
+	}
+
 	defaultStorage, err := storage.NewEmailStorage(tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to create default storage: %v", err)
@@ -516,18 +523,19 @@ func TestMultiDomainEmailDelivery(t *testing.T) {
 		t.Fatalf("Failed to add domain2: %v", err)
 	}
 
-	// Start server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to create listener: %v", err)
-	}
-	defer listener.Close()
-
+	// Start server in background
 	go func() {
-		if err := server.server.Serve(listener); err != nil {
+		if err := server.Start(); err != nil && err != smtp.ErrServerClosed {
 			t.Errorf("Server error: %v", err)
 		}
 	}()
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+	defer server.Stop()
+
+	// Get server address
+	addr := fmt.Sprintf("127.0.0.1:%d", server.port)
 
 	// Test email delivery
 	tests := []struct {
@@ -555,7 +563,7 @@ func TestMultiDomainEmailDelivery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := smtp.Dial(fmt.Sprintf("127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port))
+			c, err := smtp.Dial(addr)
 			if err != nil {
 				t.Fatalf("SMTP dial failed: %v", err)
 			}
@@ -573,7 +581,7 @@ func TestMultiDomainEmailDelivery(t *testing.T) {
 				t.Fatalf("DATA command failed: %v", err)
 			}
 
-			msg := []byte("Subject: Test\r\n\r\nTest message\r\n")
+			msg := []byte(fmt.Sprintf("To: %s\r\nFrom: %s\r\nSubject: Test\r\n\r\nTest message\r\n", tt.to, tt.from))
 			if _, err := w.Write(msg); err != nil {
 				t.Fatalf("Write failed: %v", err)
 			}
@@ -583,7 +591,7 @@ func TestMultiDomainEmailDelivery(t *testing.T) {
 
 			// Verify email storage
 			time.Sleep(100 * time.Millisecond) // Wait for async storage
-			files, err := os.ReadDir(tt.wantPath)
+			files, err := os.ReadDir(filepath.Join(tt.wantPath, "user", "IN"))
 			if err != nil {
 				t.Fatalf("Failed to read storage directory: %v", err)
 			}
