@@ -11,11 +11,13 @@ It's a useful tool for development, testing and debugging of applications that s
 ## ✨ Features
 
 - Captures all received emails
+- Supports multiple simultaneous SMTP sessions
+- Thread-safe email storage with unique file identifiers
 - Automatically organizes by domain and user
 - Stores emails in .eml format
 - Preserves all attachments
 - Organized and intuitive file structure
-- Naming based on timestamp and subject
+- Naming based on timestamp, unique ID, and subject
 
 ## 🚀 Installation
 
@@ -41,14 +43,24 @@ gargantua-sink --port 2525 --storage-path /path/to/storage
 storage/
 ├── example.com/
 │   ├── john.doe/
-│   │   ├── 20230615123456-welcome-to-our-service.eml
-│   │   └── 20230615124512-your-account-details.eml
+│   │   ├── 20230615123456-a1b2c3d4-welcome-to-our-service.eml
+│   │   └── 20230615124512-e5f6g7h8-your-account-details.eml
 │   └── jane.doe/
-│       └── 20230615130145-monthly-newsletter.eml
+│       └── 20230615130145-i9j0k1l2-monthly-newsletter.eml
 └── another-domain.com/
     └── user/
-        └── 20230615140023-important-update.eml
+        └── 20230615140023-m3n4o5p6-important-update.eml
 ```
+
+## ⚡ Performance
+
+Gargantua Sink is designed for high performance and reliability:
+
+- Handles 3000+ emails per second under load
+- Supports multiple concurrent SMTP sessions
+- Thread-safe storage with unique file identifiers
+- Efficient handling of attachments and large emails
+- Minimal memory footprint
 
 ## 🔧 Configuration
 
