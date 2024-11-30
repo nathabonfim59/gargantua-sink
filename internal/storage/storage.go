@@ -19,7 +19,7 @@ const (
 	// Incoming represents emails received by the server
 	Incoming Direction = iota
 	// Outgoing represents emails sent through the server
-	Outgoing
+	Outgoing Direction = iota
 )
 
 func (d Direction) String() string {
@@ -65,7 +65,7 @@ func NewEmailStorage(rootPath string) (*EmailStorage, error) {
 
 // StoreEmail saves an email message to the filesystem using the specified metadata.
 // The email is stored in the following structure:
-// rootPath/domain/user/YYYYMMDDHHMMSS-[unique-id]-[IN|OUT]-subject.eml
+// rootPath/domain/user/IN|OUT/YYYYMMDDHHMMSS-[unique-id]-subject.eml
 func (storage *EmailStorage) StoreEmail(direction Direction, domain, user, subject string, content []byte) error {
 	storage.mu.Lock()
 	defer storage.mu.Unlock()
@@ -74,16 +74,16 @@ func (storage *EmailStorage) StoreEmail(direction Direction, domain, user, subje
 	safeSubject := safeFilename.ReplaceAllString(subject, "_")
 	timestamp := time.Now().Format("20060102150405")
 	uniqueID := generateUniqueID()
-	filename := fmt.Sprintf("%s-%s-%s-%s.eml", timestamp, uniqueID, direction, safeSubject)
+	filename := fmt.Sprintf("%s-%s-%s.eml", timestamp, uniqueID, safeSubject)
 
-	// Create user directory
-	userPath := filepath.Join(storage.rootPath, domain, user)
-	if err := os.MkdirAll(userPath, 0755); err != nil {
-		return fmt.Errorf("creating user directory: %w", err)
+	// Create direction-specific directory
+	dirPath := filepath.Join(storage.rootPath, domain, user, direction.String())
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return fmt.Errorf("creating direction directory: %w", err)
 	}
 
 	// Write email file
-	emailPath := filepath.Join(userPath, filename)
+	emailPath := filepath.Join(dirPath, filename)
 	if err := os.WriteFile(emailPath, content, 0644); err != nil {
 		return fmt.Errorf("writing email file: %w", err)
 	}
