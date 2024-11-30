@@ -12,6 +12,27 @@ import (
 	"time"
 )
 
+// Direction represents the flow of an email (incoming or outgoing)
+type Direction int
+
+const (
+	// Incoming represents emails received by the server
+	Incoming Direction = iota
+	// Outgoing represents emails sent through the server
+	Outgoing
+)
+
+func (d Direction) String() string {
+	switch d {
+	case Incoming:
+		return "IN"
+	case Outgoing:
+		return "OUT"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 // EmailStorage handles the persistence of email messages to the filesystem.
 type EmailStorage struct {
 	rootPath string
@@ -44,8 +65,8 @@ func NewEmailStorage(rootPath string) (*EmailStorage, error) {
 
 // StoreEmail saves an email message to the filesystem using the specified metadata.
 // The email is stored in the following structure:
-// rootPath/domain/user/YYYYMMDDHHMMSS-[unique-id]-subject.eml
-func (storage *EmailStorage) StoreEmail(domain, user, subject string, content []byte) error {
+// rootPath/domain/user/YYYYMMDDHHMMSS-[unique-id]-[IN|OUT]-subject.eml
+func (storage *EmailStorage) StoreEmail(direction Direction, domain, user, subject string, content []byte) error {
 	storage.mu.Lock()
 	defer storage.mu.Unlock()
 
@@ -53,7 +74,7 @@ func (storage *EmailStorage) StoreEmail(domain, user, subject string, content []
 	safeSubject := safeFilename.ReplaceAllString(subject, "_")
 	timestamp := time.Now().Format("20060102150405")
 	uniqueID := generateUniqueID()
-	filename := fmt.Sprintf("%s-%s-%s.eml", timestamp, uniqueID, safeSubject)
+	filename := fmt.Sprintf("%s-%s-%s-%s.eml", timestamp, uniqueID, direction, safeSubject)
 
 	// Create user directory
 	userPath := filepath.Join(storage.rootPath, domain, user)

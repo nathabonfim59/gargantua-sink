@@ -59,7 +59,7 @@ func (s *Session) Data(r io.Reader) error {
 		domain, user := parseEmailAddress(recipient)
 		subject := fmt.Sprintf("from-%s", s.from) // Simple subject based on sender
 
-		if err := s.storage.StoreEmail(domain, user, subject, content); err != nil {
+		if err := s.storage.StoreEmail(storage.Incoming, domain, user, subject, content); err != nil {
 			log.Printf("Error storing email for recipient %s: %v", recipient, err)
 		}
 	}
@@ -99,12 +99,12 @@ func (server *Server) Start() error {
 	
 	server.server = smtp.NewServer(backend)
 	server.server.Addr = fmt.Sprintf(":%d", server.port)
-	server.server.Domain = "localhost"
-	server.server.ReadTimeout = 30 * time.Second
-	server.server.WriteTimeout = 30 * time.Second
+	server.server.ReadTimeout = 10 * time.Second
+	server.server.WriteTimeout = 10 * time.Second
 	server.server.MaxMessageBytes = 1024 * 1024 // 1MB
 	server.server.MaxRecipients = 50
 	server.server.AllowInsecureAuth = true
+	server.server.Direction = smtp.DirectionInbound
 
 	log.Printf("Starting SMTP server on :%d", server.port)
 	return server.server.ListenAndServe()
@@ -120,7 +120,6 @@ func (server *Server) Stop() error {
 
 // parseEmailAddress extracts domain and user from email address.
 func parseEmailAddress(email string) (domain, user string) {
-	// Simple parsing, can be enhanced for edge cases
 	for i := 0; i < len(email); i++ {
 		if email[i] == '@' {
 			return email[i+1:], email[:i]
