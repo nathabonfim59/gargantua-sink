@@ -329,8 +329,8 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 	defer server.Stop()
 
 	const (
-		numSessions     = 10 // Number of simultaneous SMTP sessions
-		emailsPerSession = 5 // Number of emails to send in each session
+		numSessions      = 10 // Number of simultaneous SMTP sessions
+		emailsPerSession = 5  // Number of emails to send in each session
 	)
 
 	var wg sync.WaitGroup
@@ -383,7 +383,6 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 					errCh <- fmt.Errorf("session %d email %d write failed: %w", sessionID, emailID, err)
 					return
 				}
-
 				if err := wc.Close(); err != nil {
 					errCh <- fmt.Errorf("session %d email %d close failed: %w", sessionID, emailID, err)
 					return
@@ -410,7 +409,7 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 		domain := "test.com"
 		user := fmt.Sprintf("recipient%d", session)
 		userDir := filepath.Join(tempDir, domain, user, "IN")
-		
+
 		files, err := os.ReadDir(userDir)
 		if err != nil {
 			t.Errorf("reading directory for session %d failed: %v", session, err)
@@ -437,4 +436,160 @@ func TestSimultaneousSMTPSessions(t *testing.T) {
 	}
 
 	t.Logf("Successfully processed %d simultaneous sessions with %d emails each", numSessions, emailsPerSession)
+}
+
+func TestAddDomain(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := NewServer(2525, nil)
+
+	tests := []struct {
+		name       string
+		domain     string
+		certFile   string
+		keyFile    string
+		storageDir string
+		wantErr    bool
+	}{
+		{
+			name:       "valid domain without TLS",
+			domain:     "example.com",
+			certFile:   "",
+			keyFile:    "",
+			storageDir: filepath.Join(tmpDir, "example.com"),
+			wantErr:    false,
+		},
+		{
+			name:       "invalid domain name",
+			domain:     "",
+			certFile:   "",
+			keyFile:    "",
+			storageDir: filepath.Join(tmpDir, "invalid"),
+			wantErr:    true,
+		},
+		{
+			name:       "missing cert file",
+			domain:     "test.org",
+			certFile:   "",
+			keyFile:    "key.pem",
+			storageDir: filepath.Join(tmpDir, "test.org"),
+			wantErr:    true,
+		},
+		{
+			name:       "missing key file",
+			domain:     "test.org",
+			certFile:   "cert.pem",
+			keyFile:    "",
+			storageDir: filepath.Join(tmpDir, "test.org"),
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := server.AddDomain(tt.domain, tt.certFile, tt.keyFile, tt.storageDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AddDomain() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMultiDomainEmailDelivery(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create storage directories
+	domain1Dir := filepath.Join(tmpDir, "domain1")
+	domain2Dir := filepath.Join(tmpDir, "domain2")
+
+	defaultStorage, err := storage.NewEmailStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create default storage: %v", err)
+	}
+
+	server := NewServer(0, defaultStorage)
+
+	// Add domains
+	if err := server.AddDomain("example.com", "", "", domain1Dir); err != nil {
+		t.Fatalf("Failed to add domain1: %v", err)
+	}
+	if err := server.AddDomain("test.org", "", "", domain2Dir); err != nil {
+		t.Fatalf("Failed to add domain2: %v", err)
+	}
+
+	// Start server
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		if err := server.server.Serve(listener); err != nil {
+			t.Errorf("Server error: %v", err)
+		}
+	}()
+
+	// Test email delivery
+	tests := []struct {
+		name     string
+		from     string
+		to       string
+		domain   string
+		wantPath string
+	}{
+		{
+			name:     "delivery to domain1",
+			from:     "sender@external.com",
+			to:       "user@example.com",
+			domain:   "example.com",
+			wantPath: domain1Dir,
+		},
+		{
+			name:     "delivery to domain2",
+			from:     "sender@external.com",
+			to:       "user@test.org",
+			domain:   "test.org",
+			wantPath: domain2Dir,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := smtp.Dial(fmt.Sprintf("127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port))
+			if err != nil {
+				t.Fatalf("SMTP dial failed: %v", err)
+			}
+			defer c.Close()
+
+			if err := c.Mail(tt.from, &smtp.MailOptions{}); err != nil {
+				t.Fatalf("MAIL FROM failed: %v", err)
+			}
+			if err := c.Rcpt(tt.to, &smtp.RcptOptions{}); err != nil {
+				t.Fatalf("RCPT TO failed: %v", err)
+			}
+
+			w, err := c.Data()
+			if err != nil {
+				t.Fatalf("DATA command failed: %v", err)
+			}
+
+			msg := []byte("Subject: Test\r\n\r\nTest message\r\n")
+			if _, err := w.Write(msg); err != nil {
+				t.Fatalf("Write failed: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close failed: %v", err)
+			}
+
+			// Verify email storage
+			time.Sleep(100 * time.Millisecond) // Wait for async storage
+			files, err := os.ReadDir(tt.wantPath)
+			if err != nil {
+				t.Fatalf("Failed to read storage directory: %v", err)
+			}
+			if len(files) == 0 {
+				t.Errorf("No email stored in %s", tt.wantPath)
+			}
+		})
+	}
 }

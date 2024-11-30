@@ -15,18 +15,21 @@ import (
 // Backend implements SMTP server handler.
 type Backend struct {
 	storage *storage.EmailStorage
+	domains map[string]DomainConfig
 }
 
 // NewSession creates a new SMTP session.
 func (bkd *Backend) NewSession(_ *smtp.Conn) (smtp.Session, error) {
 	return &Session{
 		storage: bkd.storage,
+		domains: bkd.domains,
 	}, nil
 }
 
 // Session represents an SMTP session.
 type Session struct {
 	storage    *storage.EmailStorage
+	domains    map[string]DomainConfig
 	from       string
 	recipients []string
 }
@@ -88,40 +91,76 @@ func (s *Session) Logout() error {
 	return nil
 }
 
+// DomainConfig represents the configuration for a specific domain
+type DomainConfig struct {
+	Domain     string
+	TLSConfig  *tls.Config
+	Storage    *storage.EmailStorage
+	StorageDir string
+}
+
 // Server represents an SMTP server instance.
 type Server struct {
-	port      int
-	storage   *storage.EmailStorage
-	server    *smtp.Server
-	tlsConfig *tls.Config
+	port    int
+	domains map[string]DomainConfig
+	storage *storage.EmailStorage
+	server  *smtp.Server
 }
 
 // NewServer creates a new SMTP server instance.
-func NewServer(port int, emailStorage *storage.EmailStorage) *Server {
+func NewServer(port int, defaultStorage *storage.EmailStorage) *Server {
 	return &Server{
 		port:    port,
-		storage: emailStorage,
+		storage: defaultStorage,
+		domains: make(map[string]DomainConfig),
 	}
 }
 
-// SetTLSConfig configures TLS for the server using certificate files
-func (server *Server) SetTLSConfig(certFile, keyFile string) error {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+// AddDomain adds a new domain configuration to the server
+func (s *Server) AddDomain(domain, certFile, keyFile, storageDir string) error {
+	if domain == "" {
+		return fmt.Errorf("domain name cannot be empty")
+	}
+
+	// Validate TLS configuration
+	if (certFile != "" && keyFile == "") || (certFile == "" && keyFile != "") {
+		return fmt.Errorf("both certificate and key files must be provided for TLS")
+	}
+
+	// Create storage for the domain
+	storage, err := storage.NewEmailStorage(storageDir)
 	if err != nil {
-		return fmt.Errorf("loading TLS certificates: %w", err)
+		return fmt.Errorf("creating storage for domain %s: %w", domain, err)
 	}
 
-	server.tlsConfig = &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:  tls.VersionTLS12,
+	// Create domain configuration
+	config := &DomainConfig{
+		Domain:  domain,
+		Storage: storage,
 	}
 
+	// Configure TLS if certificate files are provided
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("loading TLS certificate for domain %s: %w", domain, err)
+		}
+		config.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ServerName:   domain,
+		}
+	}
+
+	s.domains[domain] = *config
 	return nil
 }
 
 // Start initializes the SMTP server and begins listening for connections.
 func (server *Server) Start() error {
-	backend := &Backend{storage: server.storage}
+	backend := &Backend{
+		storage: server.storage,
+		domains: server.domains,
+	}
 
 	server.server = smtp.NewServer(backend)
 	server.server.Addr = fmt.Sprintf(":%d", server.port)
@@ -129,12 +168,26 @@ func (server *Server) Start() error {
 	server.server.WriteTimeout = 10 * time.Second
 	server.server.MaxMessageBytes = 1024 * 1024 // 1MB
 	server.server.MaxRecipients = 50
-	
-	// Configure TLS if certificates are provided
-	if server.tlsConfig != nil {
-		server.server.TLSConfig = server.tlsConfig
-		server.server.AllowInsecureAuth = false // Require secure authentication when TLS is enabled
-		log.Printf("TLS enabled")
+
+	// Configure TLS if any domains are configured
+	if len(server.domains) > 0 {
+		// Create a TLS config that selects the appropriate certificate based on domain
+		tlsConfig := &tls.Config{
+			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				if config, ok := server.domains[hello.ServerName]; ok {
+					return &config.TLSConfig.Certificates[0], nil
+				}
+				// Return the first certificate as default if domain not found
+				for _, config := range server.domains {
+					return &config.TLSConfig.Certificates[0], nil
+				}
+				return nil, fmt.Errorf("no certificate found for domain: %s", hello.ServerName)
+			},
+			MinVersion: tls.VersionTLS12,
+		}
+		server.server.TLSConfig = tlsConfig
+		server.server.AllowInsecureAuth = false
+		log.Printf("TLS enabled for %d domains", len(server.domains))
 	} else {
 		server.server.AllowInsecureAuth = true
 		log.Printf("Warning: Running without TLS encryption")

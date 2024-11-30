@@ -140,6 +140,99 @@ sleep 2
 check_email "example.com" "sender" "OUT" "outgoing test email"
 check_email "example.com" "recipient" "IN" "outgoing test email"
 
+# Test 6: Multi-domain configuration
+echo "Test 6: Multi-domain configuration"
+SMTP_PORT=2526
+TEST_DIR=$(mktemp -d)
+CONFIG_FILE="$TEST_DIR/test_config.json"
+
+# Create test directories
+mkdir -p "$TEST_DIR/domain1"
+mkdir -p "$TEST_DIR/domain2"
+
+# Generate self-signed certificates for testing
+generate_cert() {
+    local domain=$1
+    local dir="$TEST_DIR/$domain"
+    openssl req -x509 -newkey rsa:2048 -keyout "$dir/key.pem" -out "$dir/cert.pem" -days 1 -nodes \
+        -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain"
+}
+
+generate_cert "example.com"
+generate_cert "test.org"
+
+# Create test configuration
+cat > "$CONFIG_FILE" << EOF
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "cert_file": "$TEST_DIR/domain1/cert.pem",
+      "key_file": "$TEST_DIR/domain1/key.pem",
+      "storage_dir": "$TEST_DIR/domain1/mail"
+    },
+    {
+      "domain": "test.org",
+      "cert_file": "$TEST_DIR/domain2/cert.pem",
+      "key_file": "$TEST_DIR/domain2/key.pem",
+      "storage_dir": "$TEST_DIR/domain2/mail"
+    }
+  ]
+}
+EOF
+
+# Start the server in background
+$BINARY_PATH --storage "$TEST_DIR/default" --config "$CONFIG_FILE" --port $SMTP_PORT &
+SERVER_PID=$!
+
+# Wait for server to start
+sleep 2
+
+# Test functions
+send_test_email() {
+    local from=$1
+    local to=$2
+    local subject=$3
+    local body=$4
+    
+    swaks --from "$from" \
+          --to "$to" \
+          --server localhost \
+          --port $SMTP_PORT \
+          --header "Subject: $subject" \
+          --body "$body"
+}
+
+# Test Scenario 1: Send email to first domain
+echo "Testing email delivery to example.com..."
+send_test_email "sender@external.com" "user@example.com" "Test Email 1" "This is a test email for example.com"
+
+# Test Scenario 2: Send email to second domain
+echo "Testing email delivery to test.org..."
+send_test_email "sender@external.com" "user@test.org" "Test Email 2" "This is a test email for test.org"
+
+# Verify emails were stored in correct locations
+check_email_storage() {
+    local domain=$1
+    local dir="$TEST_DIR/$domain/mail"
+    
+    if [ -d "$dir" ] && [ "$(ls -A "$dir")" ]; then
+        echo "✓ Email storage verified for $domain"
+    else
+        echo "✗ No emails found in storage for $domain"
+        exit 1
+    fi
+}
+
+sleep 1  # Wait for emails to be processed
+
+check_email_storage "domain1"
+check_email_storage "domain2"
+
+# Cleanup
+kill $SERVER_PID
+rm -rf "$TEST_DIR"
+
 # Cleanup function
 cleanup() {
     echo "Cleaning up..."

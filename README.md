@@ -22,6 +22,11 @@ It's particularly useful for:
 - Preserves all email content and metadata
 - Organized and intuitive file structure
 - Naming based on timestamp and unique ID
+- Multi-domain support with separate TLS configurations
+- Flexible storage organization by domain and user
+- Support for both secure (TLS) and insecure connections
+- Simple command-line interface
+- Configurable storage paths for each domain
 
 ## 🚀 Installation
 
@@ -31,20 +36,48 @@ go install github.com/nathabonfim59/gargantua-sink@latest
 
 ## 💻 Usage
 
-### Development Mode
+### Basic Usage
+
+To start the server with default configuration:
+
 ```bash
-gargantua-sink --port 2525 --storage-path /path/to/storage
+gargantua-sink --storage /path/to/storage --port 2525
 ```
 
-### Production Mode
-```bash
-sudo gargantua-sink --port 25 --storage-path /path/to/storage
+### Multi-Domain Configuration
+
+The server supports handling multiple domains with separate TLS certificates and storage directories. Create a JSON configuration file (e.g., `config.json`):
+
+```json
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "cert_file": "/path/to/example.com.crt",
+      "key_file": "/path/to/example.com.key",
+      "storage_dir": "/var/mail/example.com"
+    },
+    {
+      "domain": "test.org",
+      "cert_file": "/path/to/test.org.crt",
+      "key_file": "/path/to/test.org.key",
+      "storage_dir": "/var/mail/test.org"
+    }
+  ]
+}
 ```
 
-### Parameters
+Then start the server with the configuration file:
 
-- `--port`: Port on which the SMTP server will listen (default: 2525)
-- `--storage-path`: Path where emails will be stored (required)
+```bash
+gargantua-sink --storage /path/to/default/storage --config config.json --port 2525
+```
+
+### Command Line Options
+
+- `--port, -p`: SMTP server listening port (default: 2525)
+- `--storage, -s`: Default storage directory for emails (required)
+- `--config, -c`: Path to domain configuration JSON file (optional)
 
 ## 📁 Storage Structure
 

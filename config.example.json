@@ -1,0 +1,16 @@
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "cert_file": "/path/to/example.com.crt",
+      "key_file": "/path/to/example.com.key",
+      "storage_dir": "/var/mail/example.com"
+    },
+    {
+      "domain": "test.org",
+      "cert_file": "/path/to/test.org.crt",
+      "key_file": "/path/to/test.org.key",
+      "storage_dir": "/var/mail/test.org"
+    }
+  ]
+}
