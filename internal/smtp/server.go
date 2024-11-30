@@ -25,9 +25,9 @@ func (bkd *Backend) NewSession(_ *smtp.Conn) (smtp.Session, error) {
 
 // Session represents an SMTP session.
 type Session struct {
-	storage     *storage.EmailStorage
-	from        string
-	recipients  []string
+	storage    *storage.EmailStorage
+	from       string
+	recipients []string
 }
 
 // AuthPlain implements authentication - always returns nil as we accept all auth.
@@ -54,10 +54,19 @@ func (s *Session) Data(r io.Reader) error {
 		return fmt.Errorf("reading email content: %w", err)
 	}
 
-	// Store email for each recipient
+	// Extract domain and user from sender
+	senderDomain, senderUser := parseEmailAddress(s.from)
+
+	// Store email in sender's OUT directory
+	subject := fmt.Sprintf("to-%s", s.recipients[0]) // Use first recipient for subject
+	if err := s.storage.StoreEmail(storage.Outgoing, senderDomain, senderUser, subject, content); err != nil {
+		log.Printf("Error storing outgoing email for sender %s: %v", s.from, err)
+	}
+
+	// Store email for each recipient in their IN directory
 	for _, recipient := range s.recipients {
 		domain, user := parseEmailAddress(recipient)
-		subject := fmt.Sprintf("from-%s", s.from) // Simple subject based on sender
+		subject := fmt.Sprintf("from-%s", s.from)
 
 		if err := s.storage.StoreEmail(storage.Incoming, domain, user, subject, content); err != nil {
 			log.Printf("Error storing email for recipient %s: %v", recipient, err)
@@ -96,7 +105,7 @@ func NewServer(port int, emailStorage *storage.EmailStorage) *Server {
 // Start initializes the SMTP server and begins listening for connections.
 func (server *Server) Start() error {
 	backend := &Backend{storage: server.storage}
-	
+
 	server.server = smtp.NewServer(backend)
 	server.server.Addr = fmt.Sprintf(":%d", server.port)
 	server.server.ReadTimeout = 10 * time.Second
